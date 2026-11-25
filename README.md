@@ -1,4 +1,4 @@
-# gitdb
+# gitarium
 
 把整个 Git 仓库存进数据库的内部 Git 服务器。标准 `git` 客户端通过 Smart HTTP 与 SSH 推拉；
 对象、引用、仓库元数据和 SSH 主机密钥全部保存在 SQLite 或 PostgreSQL 中，迁移时恢复数据库即可。
@@ -20,7 +20,7 @@
 SQLite（单机测试）：
 
 ```bash
-DATABASE_URL=data/gitdb.sqlite3 \
+DATABASE_URL=data/gitarium.sqlite3 \
 GIT_HTTP_ADDR=127.0.0.1:3000 \
 GIT_SSH_ADDR=127.0.0.1:2222 \
 cargo run
@@ -29,12 +29,12 @@ cargo run
 PostgreSQL（发布）：
 
 ```bash
-docker run -d --name gitdb-pg \
-  -e POSTGRES_USER=gitdb -e POSTGRES_PASSWORD=gitdb \
+docker run -d --name gitarium-pg \
+  -e POSTGRES_USER=gitarium -e POSTGRES_PASSWORD=gitarium \
   -p 127.0.0.1:5432:5432 postgres:17-alpine
-docker exec gitdb-pg createdb -U gitdb gitdb
+docker exec gitarium-pg createdb -U gitarium gitarium
 
-DATABASE_URL=postgres://gitdb:gitdb@127.0.0.1:5432/gitdb \
+DATABASE_URL=postgres://gitarium:gitarium@127.0.0.1:5432/gitarium \
 GIT_HTTP_ADDR=0.0.0.0:3000 \
 GIT_SSH_ADDR=0.0.0.0:2222 \
 cargo run
@@ -46,7 +46,7 @@ cargo run
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `DATABASE_URL` | `data/gitdb.sqlite3` | `postgres://...` 走 PostgreSQL，其余视为 SQLite 文件路径 |
+| `DATABASE_URL` | `data/gitarium.sqlite3` | `postgres://...` 走 PostgreSQL，其余视为 SQLite 文件路径 |
 | `GIT_HTTP_ADDR` | `127.0.0.1:3000` | HTTP 监听地址 |
 | `GIT_SSH_ADDR` | `127.0.0.1:2222` | SSH 监听地址 |
 | `GIT_USER` | `git` | 推拉用户名 |

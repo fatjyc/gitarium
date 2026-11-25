@@ -97,10 +97,10 @@ mod tests {
     fn copy_then_insert_reproduces_result() {
         let base = b"Hello, world!\n";
         // 基对象长度 14，结果长度 14；复制偏移 0 长度 7，再插入 7 字节。
-        let delta = b"\x0e\x0e\x90\x07\x07gitdb!\n";
+        let delta = b"\x0e\x0e\x90\x07\x07delta!\n";
         assert_eq!(
             apply_delta(base, delta).unwrap(),
-            b"Hello, gitdb!\n".to_vec()
+            b"Hello, delta!\n".to_vec()
         );
     }
 

@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 common 测试装置、真实 git 客户端与 OpenSSH 客户端，依赖 gitdb::ssh 启动独立 SSH 服务
+ * [INPUT]: 依赖 common 测试装置、真实 git 客户端与 OpenSSH 客户端，依赖 gitarium::ssh 启动独立 SSH 服务
  * [OUTPUT]: 验证 SSH 与 HTTP 双向互操作、密码认证、命令白名单、不存在仓库失败与主机密钥持久化
  * [POS]: SSH 传输的端到端验收；不模拟协议字节，全部经由真实 git 与 ssh 命令
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -12,8 +12,8 @@ use std::time::Duration;
 use common::{
     git, git_ok, http_url, init_repo, ssh_command, ssh_git, ssh_url, start_server, write_askpass,
 };
-use gitdb::config::Config;
-use gitdb::{ssh, store::Store};
+use gitarium::config::Config;
+use gitarium::{ssh, store::Store};
 use tokio::net::TcpListener;
 
 fn clone_ok(cwd: &std::path::Path, args: &[&str]) -> std::path::PathBuf {

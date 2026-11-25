@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 /**
- * [INPUT]: 依赖 gitdb 的 Config、Store、http::App、http::serve 与 ssh::serve；依赖标准 git 与 OpenSSH 客户端
+ * [INPUT]: 依赖 gitarium 的 Config、Store、http::App、http::serve 与 ssh::serve；依赖标准 git 与 OpenSSH 客户端
  * [OUTPUT]: 导出 TestServer、HTTP/SSH 地址、askpass 脚本、git/ssh 命令辅助与原始 HTTP 请求辅助
  * [POS]: 集成测试共用装置；每个测试独立数据库、随机端口与隔离的 Git 配置，SSH 认证经 askpass 自动应答
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -13,10 +13,10 @@ use std::process::{Command, Output};
 use std::sync::Arc;
 
 use base64::Engine;
-use gitdb::config::Config;
-use gitdb::http::{self, App};
-use gitdb::ssh;
-use gitdb::store::Store;
+use gitarium::config::Config;
+use gitarium::http::{self, App};
+use gitarium::ssh;
+use gitarium::store::Store;
 
 const SSH_COMMAND: &str = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o PubkeyAuthentication=no -o PreferredAuthentications=password -o KbdInteractiveAuthentication=no -o NumberOfPasswordPrompts=3";
 

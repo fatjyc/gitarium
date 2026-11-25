@@ -7,21 +7,21 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-CONTAINER=${GITDB_ACCEPTANCE_CONTAINER:-gitdb-acceptance-pg}
-PG_PORT=${GITDB_ACCEPTANCE_PG_PORT:-55439}
-SQLITE_HTTP_PORT=${GITDB_ACCEPTANCE_SQLITE_HTTP:-31801}
-SQLITE_SSH_PORT=${GITDB_ACCEPTANCE_SQLITE_SSH:-22801}
-PG_HTTP_A=${GITDB_ACCEPTANCE_PG_HTTP_A:-31802}
-PG_SSH_A=${GITDB_ACCEPTANCE_PG_SSH_A:-22802}
-PG_HTTP_B=${GITDB_ACCEPTANCE_PG_HTTP_B:-31803}
-PG_SSH_B=${GITDB_ACCEPTANCE_PG_SSH_B:-22803}
-PG_USER=gitdb
-PG_PASSWORD=gitdb
-DB_SOURCE=gitdb_acceptance_source
-DB_RESTORED=gitdb_acceptance_restored
-DB_TESTS=gitdb_acceptance_tests
+CONTAINER=${GITARIUM_ACCEPTANCE_CONTAINER:-gitarium-acceptance-pg}
+PG_PORT=${GITARIUM_ACCEPTANCE_PG_PORT:-55439}
+SQLITE_HTTP_PORT=${GITARIUM_ACCEPTANCE_SQLITE_HTTP:-31801}
+SQLITE_SSH_PORT=${GITARIUM_ACCEPTANCE_SQLITE_SSH:-22801}
+PG_HTTP_A=${GITARIUM_ACCEPTANCE_PG_HTTP_A:-31802}
+PG_SSH_A=${GITARIUM_ACCEPTANCE_PG_SSH_A:-22802}
+PG_HTTP_B=${GITARIUM_ACCEPTANCE_PG_HTTP_B:-31803}
+PG_SSH_B=${GITARIUM_ACCEPTANCE_PG_SSH_B:-22803}
+PG_USER=gitarium
+PG_PASSWORD=gitarium
+DB_SOURCE=gitarium_acceptance_source
+DB_RESTORED=gitarium_acceptance_restored
+DB_TESTS=gitarium_acceptance_tests
 
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/gitdb-acceptance.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/gitarium-acceptance.XXXXXX")
 PIDS=()
 SUCCESS=0
 LAST_PID=
@@ -67,7 +67,7 @@ start_server() {
     DATABASE_URL="$db_url" \
         GIT_HTTP_ADDR="127.0.0.1:$http_port" \
         GIT_SSH_ADDR="127.0.0.1:$ssh_port" \
-        "$ROOT/target/debug/gitdb" >"$WORK/$log" 2>&1 &
+        "$ROOT/target/debug/gitarium" >"$WORK/$log" 2>&1 &
     LAST_PID=$!
     PIDS+=("$LAST_PID")
     wait_for_http "$http_port" "$LAST_PID"
@@ -118,13 +118,13 @@ command -v ssh-keyscan >/dev/null || fail "未找到 ssh-keyscan"
 
 echo "==> 准备隔离的 PostgreSQL 容器"
 if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
-    label=$(docker inspect -f '{{ if index .Config.Labels "gitdb.acceptance" }}true{{ end }}' "$CONTAINER" 2>/dev/null || true)
+    label=$(docker inspect -f '{{ if index .Config.Labels "gitarium.acceptance" }}true{{ end }}' "$CONTAINER" 2>/dev/null || true)
     [ "$label" = "true" ] ||
-        fail "容器 $CONTAINER 已存在且不是本脚本创建，请更换 GITDB_ACCEPTANCE_CONTAINER"
+        fail "容器 $CONTAINER 已存在且不是本脚本创建，请更换 GITARIUM_ACCEPTANCE_CONTAINER"
     docker rm -f "$CONTAINER" >/dev/null
 fi
 docker run -d --name "$CONTAINER" \
-    --label gitdb.acceptance=true \
+    --label gitarium.acceptance=true \
     -e "POSTGRES_USER=$PG_USER" \
     -e "POSTGRES_PASSWORD=$PG_PASSWORD" \
     -p "127.0.0.1:$PG_PORT:5432" \
@@ -156,9 +156,9 @@ run_sql postgres <<< "CREATE DATABASE $DB_SOURCE;"
 run_sql postgres <<< "CREATE DATABASE $DB_RESTORED;"
 run_sql postgres <<< "CREATE DATABASE $DB_TESTS;"
 
-echo "==> 构建 gitdb"
+echo "==> 构建 gitarium"
 cargo build --quiet --manifest-path "$ROOT/Cargo.toml"
-[ -x "$ROOT/target/debug/gitdb" ] || fail "未生成 target/debug/gitdb"
+[ -x "$ROOT/target/debug/gitarium" ] || fail "未生成 target/debug/gitarium"
 
 printf '#!/bin/sh\necho git123\n' >"$WORK/askpass.sh"
 chmod 755 "$WORK/askpass.sh"

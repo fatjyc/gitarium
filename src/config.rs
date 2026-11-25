@@ -10,7 +10,7 @@ pub const DEFAULT_GIT_USER: &str = "git";
 pub const DEFAULT_GIT_PASSWORD: &str = "git123";
 pub const DEFAULT_HTTP_ADDR: &str = "127.0.0.1:3000";
 pub const DEFAULT_SSH_ADDR: &str = "127.0.0.1:2222";
-pub const DEFAULT_DATABASE_URL: &str = "data/gitdb.sqlite3";
+pub const DEFAULT_DATABASE_URL: &str = "data/gitarium.sqlite3";
 pub const DEFAULT_MAX_PUSH_BYTES: usize = 268_435_456;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,7 +74,7 @@ mod tests {
         assert_eq!(config.git_password, "git123");
         assert_eq!(config.http_addr, "127.0.0.1:3000");
         assert_eq!(config.ssh_addr, "127.0.0.1:2222");
-        assert_eq!(config.database_url, "data/gitdb.sqlite3");
+        assert_eq!(config.database_url, "data/gitarium.sqlite3");
         assert_eq!(config.max_push_bytes, 268_435_456);
     }
 

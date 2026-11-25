@@ -1,4 +1,4 @@
-# gitdb - 把 Git 仓库存进数据库的内部 Git 服务器
+# gitarium - 把 Git 仓库存进数据库的内部 Git 服务器
 
 Rust 2021 + axum 0.8 + russh 0.65.4 + gix-pack 0.77.0 + rusqlite 0.43 + postgres 0.19
 

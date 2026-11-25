@@ -8,7 +8,7 @@ use crate::git::object::parse_tag_target;
 use crate::git::wire::{write_flush, write_pkt};
 use crate::store::{GitKind, Store};
 
-const AGENT: &str = "agent=gitdb/0.1";
+const AGENT: &str = "agent=gitarium/0.1";
 const ZERO_OID: &str = "0000000000000000000000000000000000000000";
 const HEAD_REF: &str = "refs/heads/main";
 
@@ -135,7 +135,7 @@ mod tests {
             "{}",
             lines[0]
         );
-        assert!(lines[0].contains("agent=gitdb/"));
+        assert!(lines[0].contains("agent=gitarium/"));
     }
 
     #[test]

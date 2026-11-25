@@ -1,15 +1,15 @@
 /**
  * [INPUT]: 依赖 Config 读取环境变量，依赖 Store 打开数据库，依赖 http::serve 与 ssh::serve 启动两个入口
- * [OUTPUT]: 可执行程序 gitdb；同时监听 HTTP 与 SSH，任一入口退出即报错退出
+ * [OUTPUT]: 可执行程序 gitarium；同时监听 HTTP 与 SSH，任一入口退出即报错退出
  * [POS]: 进程入口；数据库必须在异步运行时之外打开，postgres 同步客户端不能在运行时内建立连接
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::sync::Arc;
 
-use gitdb::config::Config;
-use gitdb::http::{self, App};
-use gitdb::ssh;
-use gitdb::store::Store;
+use gitarium::config::Config;
+use gitarium::http::{self, App};
+use gitarium::ssh;
+use gitarium::store::Store;
 
 fn main() {
     let config = Config::from_env();

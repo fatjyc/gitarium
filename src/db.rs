@@ -45,7 +45,7 @@ impl Db {
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let worker_url = url.to_string();
         thread::Builder::new()
-            .name("gitdb-postgres".to_string())
+            .name("gitarium-postgres".to_string())
             .spawn(move || postgres_worker(&worker_url, task_rx, ready_tx))
             .map_err(|e| format!("启动 PostgreSQL 工作线程失败: {e}"))?;
         match ready_rx.recv() {
