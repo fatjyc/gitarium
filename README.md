@@ -103,6 +103,18 @@ curl -u "$AUTH" -X DELETE http://127.0.0.1:3000/api/repos/team-notes \
 
 仓库改名与删除在一个数据库事务中同时更新引用表和对象表，不会留下半个仓库。
 
+## AI 规则
+
+`.rulesync/` 是规则源，根目录 `CLAUDE.md` 与 `AGENTS.md` 由 rulesync 生成，不要直接改。
+修改规则时编辑 `.rulesync/rules/`，然后运行：
+
+```bash
+make rules
+```
+
+当前配置生成 Claude Code 的 `CLAUDE.md` 与通用 `AGENTS.md`；目标与特性在 `rulesync.jsonc` 中调整。
+Makefile 默认使用 `npx --yes rulesync@43.14.0`，可用 `RULESYNC=...` 覆盖。
+
 ## 迁移
 
 SQLite：
