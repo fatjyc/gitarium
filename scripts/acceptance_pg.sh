@@ -3,7 +3,7 @@
 # PostgreSQL 迁移验收。
 # 步骤：SQLite 源库推送 → 镜像迁移到 PostgreSQL → pg_dump 恢复第二个数据库
 #      → 克隆比对 → 恢复后继续推送 → SSH 克隆。
-# 依赖：docker、git、OpenSSH（ssh、ssh-keyscan）、cargo。
+# 依赖：docker、git、curl、OpenSSH（ssh、ssh-keyscan）、cargo。
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -46,10 +46,10 @@ fail() {
 }
 
 wait_for_http() {
-    local url=$1 pid=$2
+    local port=$1 pid=$2
     local _ attempt
     for attempt in $(seq 1 100); do
-        if GIT_TERMINAL_PROMPT=0 git ls-remote "$url" >/dev/null 2>&1; then
+        if curl -fsS -u git:git123 -o /dev/null "http://127.0.0.1:$port/api/repos" 2>/dev/null; then
             return 0
         fi
         if ! kill -0 "$pid" 2>/dev/null; then
@@ -58,7 +58,7 @@ wait_for_http() {
         fi
         sleep 0.1
     done
-    echo "等待服务超时: $url" >&2
+    echo "等待服务超时: 端口 $port" >&2
     return 1
 }
 
@@ -70,7 +70,7 @@ start_server() {
         "$ROOT/target/debug/gitdb" >"$WORK/$log" 2>&1 &
     LAST_PID=$!
     PIDS+=("$LAST_PID")
-    wait_for_http "http://git:git123@127.0.0.1:$http_port/probe.git" "$LAST_PID"
+    wait_for_http "$http_port" "$LAST_PID"
 }
 
 stop_server() {
@@ -113,6 +113,7 @@ scan_host_key() {
 
 command -v docker >/dev/null || fail "未找到 docker"
 command -v git >/dev/null || fail "未找到 git"
+command -v curl >/dev/null || fail "未找到 curl"
 command -v ssh-keyscan >/dev/null || fail "未找到 ssh-keyscan"
 
 echo "==> 准备隔离的 PostgreSQL 容器"

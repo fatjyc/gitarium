@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 /**
  * [INPUT]: 依赖 gitdb 的 Config、Store、http::App、http::serve 与 ssh::serve；依赖标准 git 与 OpenSSH 客户端
- * [OUTPUT]: 导出 TestServer、HTTP/SSH 地址、askpass 脚本与 git/ssh 命令辅助函数
+ * [OUTPUT]: 导出 TestServer、HTTP/SSH 地址、askpass 脚本、git/ssh 命令辅助与原始 HTTP 请求辅助
  * [POS]: 集成测试共用装置；每个测试独立数据库、随机端口与隔离的 Git 配置，SSH 认证经 askpass 自动应答
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
 
+use base64::Engine;
 use gitdb::config::Config;
 use gitdb::http::{self, App};
 use gitdb::ssh;
@@ -190,20 +191,48 @@ pub fn ssh_url(server: &TestServer, repo: &str) -> String {
     format!("ssh://git@127.0.0.1:{}/{repo}.git", server.ssh_addr.port())
 }
 
-pub fn raw_status(addr: SocketAddr, path: &str, authorization: Option<&str>) -> u16 {
+pub struct RawResponse {
+    pub status: u16,
+    pub body: String,
+}
+
+pub fn raw_request(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+    body: Option<&str>,
+) -> RawResponse {
     let mut stream = std::net::TcpStream::connect(addr).unwrap();
     let auth = authorization
         .map(|value| format!("Authorization: {value}\r\n"))
         .unwrap_or_default();
-    let request =
-        format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{auth}\r\n");
+    let body = body.unwrap_or("");
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{auth}\r\n{body}",
+        body.len()
+    );
     stream.write_all(request.as_bytes()).unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
-    response
+    let (head, body) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
+    let status = head
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|code| code.parse().ok())
-        .unwrap_or(0)
+        .unwrap_or(0);
+    RawResponse {
+        status,
+        body: body.to_string(),
+    }
+}
+
+pub fn raw_status(addr: SocketAddr, path: &str, authorization: Option<&str>) -> u16 {
+    raw_request(addr, "GET", path, authorization, None).status
+}
+
+pub fn basic_auth(password: &str) -> String {
+    let encoded = base64::engine::general_purpose::STANDARD.encode(format!("git:{password}"));
+    format!("Basic {encoded}")
 }

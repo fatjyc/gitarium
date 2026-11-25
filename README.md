@@ -7,9 +7,10 @@
 
 - 支持 `clone`、`fetch`、`pull`、`push`、分支与标签，使用 Git 协议 v0。
 - HTTP 走 Smart HTTP；SSH 只接受 `git-upload-pack` 与 `git-receive-pack` 两条命令。
-- 单一固定账号，HTTP Basic 与 SSH 密码认证使用同一组值；没有账号管理。
-- 仓库名为单段名称，可带或不带 `.git`；第一次推送自动建仓。
-- 默认分支固定为 `main`；首次推送请推送到 `main`，HEAD 与克隆的默认检出依赖它。
+- 单一固定账号，HTTP Basic、管理 API 与 SSH 密码认证使用同一组值；没有账号管理。
+- 仓库名为单段名称，可带或不带 `.git`；第一次推送自动建仓，也可以用管理 API 预先创建。
+- 默认分支固定为 `main`：HEAD 指向 `refs/heads/main`，首次推送请推送到 `main`，克隆的默认检出依赖它。
+- 克隆不存在的仓库会失败；删除仓库后，推拉与克隆同样失败。
 - 拉取忽略 `have` 协商，总是发送 wants 可达的全部对象；内部文本仓库规模可接受。
 - SSH 主机密钥首次启动时生成，保存在 `settings` 表；恢复数据库后客户端不会看到密钥变化。
 - 服务本身监听明文 HTTP。需要 HTTPS 时，在前置反向代理终止 TLS；Basic 凭据不要直接暴露在不可信网络。
@@ -64,6 +65,44 @@ git clone ssh://git@127.0.0.1:2222/demo.git
 
 SSH 会提示输入密码（默认 `git123`）。仓库 URL 中的 `.git` 后缀可以省略。
 
+## 仓库管理
+
+管理接口与 Git 推拉共用同一个 HTTP 监听和同一组 Basic 账号，请求与响应都是 JSON。
+
+```bash
+AUTH='git:git123'
+
+# 列出全部仓库
+curl -u "$AUTH" http://127.0.0.1:3000/api/repos
+
+# 预先创建仓库（已存在返回 409）
+curl -u "$AUTH" -X POST http://127.0.0.1:3000/api/repos \
+  -H 'Content-Type: application/json' -d '{"name":"demo"}'
+
+# 查看仓库详情与全部引用
+curl -u "$AUTH" http://127.0.0.1:3000/api/repos/demo
+
+# 改名
+curl -u "$AUTH" -X PATCH http://127.0.0.1:3000/api/repos/demo \
+  -H 'Content-Type: application/json' -d '{"new_name":"team-notes"}'
+
+# 删除仓库：confirm 必须与仓库名完全一致，否则返回 400
+curl -u "$AUTH" -X DELETE http://127.0.0.1:3000/api/repos/team-notes \
+  -H 'Content-Type: application/json' -d '{"confirm":"team-notes"}'
+```
+
+接口一览：
+
+| 方法与路径 | 作用 | 状态码 |
+|------------|------|--------|
+| `GET /api/repos` | 仓库列表 | 200 |
+| `POST /api/repos` | 创建仓库，请求体 `{"name":"..."}` | 201、409 |
+| `GET /api/repos/{repo}` | 详情与引用 | 200、404 |
+| `PATCH /api/repos/{repo}` | 改名，请求体 `{"new_name":"..."}` | 200、400、404、409 |
+| `DELETE /api/repos/{repo}` | 删除仓库，请求体 `{"confirm":"..."}` | 204、400、404 |
+
+仓库改名与删除在一个数据库事务中同时更新引用表和对象表，不会留下半个仓库。
+
 ## 迁移
 
 SQLite：
@@ -93,7 +132,7 @@ cargo test
 ```
 
 `cargo test` 使用真实 `git` 与 `ssh` 客户端，覆盖 HTTP/SSH 互操作、首次推送建仓、标签、二进制字节、
-过期推送拒绝、SQLite 文件复制恢复与同一数据库重启。
+过期推送拒绝、管理 API 增删改查、SQLite 文件复制恢复与同一数据库重启。
 
 `scripts/acceptance_pg.sh` 需要 Docker。脚本启动隔离的 PostgreSQL 容器，验证 SQLite → PostgreSQL
 镜像迁移、PostgreSQL 后端测试、`pg_dump` 恢复、恢复后继续推送与 SSH 克隆，结束后自动清理容器。

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 common 测试装置、真实 git 客户端与 OpenSSH 客户端，依赖 gitdb::ssh 启动独立 SSH 服务
- * [OUTPUT]: 验证 SSH 与 HTTP 双向互操作、密码认证、命令白名单与主机密钥持久化
+ * [OUTPUT]: 验证 SSH 与 HTTP 双向互操作、密码认证、命令白名单、不存在仓库失败与主机密钥持久化
  * [POS]: SSH 传输的端到端验收；不模拟协议字节，全部经由真实 git 与 ssh 命令
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -107,6 +107,16 @@ async fn non_git_command_is_rejected() {
     let output = ssh_command(&server, &server.askpass, "echo hello");
     assert!(!output.status.success(), "非 Git 命令应被拒绝");
     assert!(output.stdout.is_empty(), "被拒绝的命令不应产生输出");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cloning_a_missing_repository_over_ssh_fails() {
+    let server = start_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    let url = ssh_url(&server, "missing");
+    let output = ssh_git(&server, dir.path(), &["clone", "-q", &url, "missing-clone"]);
+    assert!(!output.status.success(), "克隆不存在的仓库应失败");
+    assert!(!dir.path().join("missing-clone").exists());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

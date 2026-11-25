@@ -61,7 +61,6 @@ impl Db {
         const SQLITE_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS repos (
     name TEXT PRIMARY KEY,
-    default_branch TEXT NOT NULL DEFAULT 'main',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS objects (
@@ -84,7 +83,6 @@ CREATE TABLE IF NOT EXISTS settings (
         const POSTGRES_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS repos (
     name TEXT PRIMARY KEY,
-    default_branch TEXT NOT NULL DEFAULT 'main',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS objects (
@@ -109,11 +107,13 @@ CREATE TABLE IF NOT EXISTS settings (
                 let guard = connection.lock().unwrap_or_else(|e| e.into_inner());
                 guard
                     .execute_batch(SQLITE_SCHEMA)
-                    .map_err(|e| format!("创建 SQLite 表失败: {e}"))
+                    .map_err(|e| format!("创建 SQLite 表失败: {e}"))?;
+                drop_legacy_default_branch(&guard)
             }
-            Db::Postgres { .. } => {
-                self.with_postgres(|client| client.batch_execute(POSTGRES_SCHEMA))
-            }
+            Db::Postgres { .. } => self.with_postgres(|client| {
+                client.batch_execute(POSTGRES_SCHEMA)?;
+                client.batch_execute("ALTER TABLE repos DROP COLUMN IF EXISTS default_branch")
+            }),
         }
     }
 
@@ -152,6 +152,28 @@ CREATE TABLE IF NOT EXISTS settings (
             .recv()
             .map_err(|_| "PostgreSQL 工作线程未返回结果".to_string())?
     }
+}
+
+fn drop_legacy_default_branch(connection: &Connection) -> Result<(), String> {
+    let columns: Vec<String> = {
+        let mut statement = connection
+            .prepare("PRAGMA table_info(repos)")
+            .map_err(|e| format!("读取 SQLite 表结构失败: {e}"))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| format!("读取 SQLite 表结构失败: {e}"))?;
+        let mut columns = Vec::new();
+        for row in rows {
+            columns.push(row.map_err(|e| format!("读取 SQLite 表结构失败: {e}"))?);
+        }
+        columns
+    };
+    if columns.iter().any(|name| name == "default_branch") {
+        connection
+            .execute("ALTER TABLE repos DROP COLUMN default_branch", [])
+            .map_err(|e| format!("删除旧 default_branch 列失败: {e}"))?;
+    }
+    Ok(())
 }
 
 fn postgres_worker(
@@ -220,5 +242,39 @@ mod tests {
         db.migrate().unwrap();
         db.migrate().unwrap();
         assert!(table_exists(&db, "objects"));
+    }
+
+    #[test]
+    fn migrate_drops_legacy_default_branch_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("git.db");
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE repos (
+                         name TEXT PRIMARY KEY,
+                         default_branch TEXT NOT NULL DEFAULT 'main',
+                         created_at TEXT NOT NULL
+                     );
+                     INSERT INTO repos(name, created_at) VALUES ('demo', '1');",
+                )
+                .unwrap();
+        }
+        let db = Db::open(path.to_str().unwrap()).unwrap();
+        db.migrate().unwrap();
+        let guard = db.sqlite().unwrap();
+        let count: i64 = guard
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('repos') WHERE name = 'default_branch'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "旧列应被删除");
+        let name: String = guard
+            .query_row("SELECT name FROM repos", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(name, "demo", "仓库行应保留");
     }
 }

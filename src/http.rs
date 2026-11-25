@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 axum 提供路由与请求体；依赖 advertise、push 协议核心；依赖 Config 的固定账号与体积上限
+ * [INPUT]: 依赖 axum 提供路由与请求体；依赖 advertise、push 协议核心；依赖 Config 的固定账号与体积上限；依赖 api 合并管理面路由
  * [OUTPUT]: 导出 App、router、serve；实现 info/refs 通告与 upload-pack、receive-pack 的字节转发
  * [POS]: HTTP 传输层；只做认证、路径解析、字节转发与 Content-Type，不承载 Git 语义
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -13,8 +13,9 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use base64::Engine;
 
+use crate::api;
+use crate::auth;
 use crate::config::Config;
 use crate::git::advertise::{self, Service};
 use crate::git::fetch;
@@ -33,6 +34,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/{repo}/info/refs", get(info_refs))
         .route("/{repo}/git-upload-pack", post(upload_pack))
         .route("/{repo}/git-receive-pack", post(receive_pack))
+        .merge(api::routes())
         .layer(DefaultBodyLimit::max(max_bytes))
         .with_state(app)
 }
@@ -47,39 +49,6 @@ fn repo_name(raw: &str) -> Option<String> {
     let name = raw.strip_suffix(".git").unwrap_or(raw);
     validate_repo_name(name).ok()?;
     Some(name.to_string())
-}
-
-fn authorized(app: &App, headers: &HeaderMap) -> bool {
-    let Some(value) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return false;
-    };
-    let Some(encoded) = value.strip_prefix("Basic ") else {
-        return false;
-    };
-    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
-        return false;
-    };
-    let Ok(text) = String::from_utf8(decoded) else {
-        return false;
-    };
-    match text.split_once(':') {
-        Some((user, password)) => {
-            user == app.config.git_user && password == app.config.git_password
-        }
-        None => false,
-    }
-}
-
-fn unauthorized() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(header::WWW_AUTHENTICATE, "Basic realm=\"git\"")],
-        "需要认证\n",
-    )
-        .into_response()
 }
 
 fn content_type(service: Service, advertisement: bool) -> String {
@@ -97,8 +66,8 @@ async fn info_refs(
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Response {
-    if !authorized(&app, &headers) {
-        return unauthorized();
+    if !auth::authorized(&app.config, &headers) {
+        return auth::unauthorized();
     }
     let Some(repo) = repo_name(&repo) else {
         return StatusCode::NOT_FOUND.into_response();
@@ -111,15 +80,22 @@ async fn info_refs(
 
     let store = app.store.clone();
     let repo_for_worker = repo.clone();
-    let advertisement =
-        tokio::task::spawn_blocking(move || advertise::refs(&store, &repo_for_worker, service))
-            .await
-            .map_err(|e| format!("任务失败: {e}"))
-            .and_then(|result| result);
-    let advertisement = match advertisement {
-        Ok(advertisement) => advertisement,
-        Err(error) => {
+    let result = tokio::task::spawn_blocking(move || {
+        if service == Service::UploadPack && !store.repo_exists(&repo_for_worker)? {
+            return Ok(None);
+        }
+        advertise::refs(&store, &repo_for_worker, service).map(Some)
+    })
+    .await;
+    let advertisement = match result {
+        Ok(Ok(Some(advertisement))) => advertisement,
+        Ok(Ok(None)) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(Err(error)) => {
             eprintln!("生成引用通告失败: {error}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        Err(error) => {
+            eprintln!("通告任务失败: {error}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -150,8 +126,8 @@ async fn upload_pack(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if !authorized(&app, &headers) {
-        return unauthorized();
+    if !auth::authorized(&app.config, &headers) {
+        return auth::unauthorized();
     }
     let Some(repo) = repo_name(&repo) else {
         return StatusCode::NOT_FOUND.into_response();
@@ -191,8 +167,8 @@ async fn receive_pack(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if !authorized(&app, &headers) {
-        return unauthorized();
+    if !auth::authorized(&app.config, &headers) {
+        return auth::unauthorized();
     }
     let Some(repo) = repo_name(&repo) else {
         return StatusCode::NOT_FOUND.into_response();

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 db::Db 的 SQLite 连接与 PostgreSQL 连接；依赖 git::GitKind 的对象类型编号
- * [OUTPUT]: 导出 Store 与对象、引用、设置的读写方法；引用更新为比较并交换语义
- * [POS]: 数据层唯一业务接口；协议核心只通过本模块接触数据库，不直接写 SQL
+ * [OUTPUT]: 导出 Store 的对象、引用、设置读写方法与仓库生命周期方法（列表、详情、创建、改名、删除）；引用更新为比较并交换语义
+ * [POS]: 数据层唯一业务接口；协议核心与管理接口只通过本模块接触数据库，不直接写 SQL
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use crate::db::Db;
@@ -53,6 +53,26 @@ pub struct GitObject {
     pub data: Vec<u8>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoInfo {
+    pub name: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RepoUpdateError {
+    NotFound,
+    Conflict,
+    InvalidName(String),
+    Database(String),
+}
+
+enum UpdateOutcome {
+    Updated,
+    NotFound,
+    Conflict,
+}
+
 pub struct Store {
     db: Db,
 }
@@ -74,7 +94,7 @@ impl Store {
         if let Some(guard) = self.db.sqlite() {
             guard
                 .execute(
-                    "INSERT OR IGNORE INTO repos(name, default_branch, created_at) VALUES (?1, 'main', ?2)",
+                    "INSERT OR IGNORE INTO repos(name, created_at) VALUES (?1, ?2)",
                     params![name, now_text()],
                 )
                 .map_err(|e| sqlite_error("创建仓库失败", e))?;
@@ -84,7 +104,7 @@ impl Store {
         let now = now_text();
         self.db.with_postgres(move |client| {
             client.execute(
-                "INSERT INTO repos(name, default_branch, created_at) VALUES ($1, 'main', $2) ON CONFLICT(name) DO NOTHING",
+                "INSERT INTO repos(name, created_at) VALUES ($1, $2) ON CONFLICT(name) DO NOTHING",
                 &[&name, &now],
             )
         })?;
@@ -92,26 +112,153 @@ impl Store {
     }
 
     pub fn repo_exists(&self, repo: &str) -> Result<bool, String> {
-        Ok(self.default_branch(repo)?.is_some())
-    }
-
-    pub fn default_branch(&self, repo: &str) -> Result<Option<String>, String> {
         let name = repo.strip_suffix(".git").unwrap_or(repo);
         if let Some(guard) = self.db.sqlite() {
             return guard
-                .query_row(
-                    "SELECT default_branch FROM repos WHERE name = ?1",
-                    [name],
-                    |row| row.get(0),
-                )
+                .query_row("SELECT 1 FROM repos WHERE name = ?1", [name], |row| {
+                    row.get::<_, i64>(0)
+                })
                 .optional()
+                .map(|row| row.is_some())
                 .map_err(|e| sqlite_error("查询仓库失败", e));
         }
         let name = name.to_string();
         let rows = self.db.with_postgres(move |client| {
-            client.query("SELECT default_branch FROM repos WHERE name = $1", &[&name])
+            client.query("SELECT 1 FROM repos WHERE name = $1", &[&name])
         })?;
-        Ok(rows.first().map(|row| row.get(0)))
+        Ok(!rows.is_empty())
+    }
+
+    pub fn list_repos(&self) -> Result<Vec<RepoInfo>, String> {
+        if let Some(guard) = self.db.sqlite() {
+            let mut statement = guard
+                .prepare("SELECT name, created_at FROM repos ORDER BY name")
+                .map_err(|e| sqlite_error("查询仓库列表失败", e))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok(RepoInfo {
+                        name: row.get(0)?,
+                        created_at: row.get(1)?,
+                    })
+                })
+                .map_err(|e| sqlite_error("查询仓库列表失败", e))?;
+            return rows
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| sqlite_error("读取仓库列表失败", e));
+        }
+        let rows = self.db.with_postgres(|client| {
+            client.query("SELECT name, created_at FROM repos ORDER BY name", &[])
+        })?;
+        Ok(rows
+            .iter()
+            .map(|row| RepoInfo {
+                name: row.get(0),
+                created_at: row.get(1),
+            })
+            .collect())
+    }
+
+    pub fn get_repo(&self, repo: &str) -> Result<Option<RepoInfo>, String> {
+        let name = normalize_repo_name(repo)?;
+        if let Some(guard) = self.db.sqlite() {
+            return guard
+                .query_row(
+                    "SELECT name, created_at FROM repos WHERE name = ?1",
+                    [&name],
+                    |row| {
+                        Ok(RepoInfo {
+                            name: row.get(0)?,
+                            created_at: row.get(1)?,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(|e| sqlite_error("查询仓库失败", e));
+        }
+        let rows = self.db.with_postgres(move |client| {
+            client.query(
+                "SELECT name, created_at FROM repos WHERE name = $1",
+                &[&name],
+            )
+        })?;
+        Ok(rows.first().map(|row| RepoInfo {
+            name: row.get(0),
+            created_at: row.get(1),
+        }))
+    }
+
+    pub fn create_repo(&self, repo: &str) -> Result<bool, String> {
+        let name = normalize_repo_name(repo)?;
+        let now = now_text();
+        if let Some(guard) = self.db.sqlite() {
+            let changed = guard
+                .execute(
+                    "INSERT OR IGNORE INTO repos(name, created_at) VALUES (?1, ?2)",
+                    params![name, now],
+                )
+                .map_err(|e| sqlite_error("创建仓库失败", e))?;
+            return Ok(changed == 1);
+        }
+        let changed = self.db.with_postgres(move |client| {
+            client.execute(
+                "INSERT INTO repos(name, created_at) VALUES ($1, $2) ON CONFLICT(name) DO NOTHING",
+                &[&name, &now],
+            )
+        })?;
+        Ok(changed == 1)
+    }
+
+    pub fn update_repo(&self, repo: &str, new_name: Option<&str>) -> Result<(), RepoUpdateError> {
+        let old = normalize_repo_name(repo).map_err(RepoUpdateError::InvalidName)?;
+        let new_name = match new_name {
+            Some(value) => Some(normalize_repo_name(value).map_err(RepoUpdateError::InvalidName)?),
+            None => None,
+        };
+        let rename = new_name.filter(|value| value != &old);
+        let outcome = if let Some(mut guard) = self.db.sqlite() {
+            update_repo_sqlite(&mut guard, &old, rename.as_deref())
+                .map_err(|e| RepoUpdateError::Database(sqlite_error("更新仓库失败", e)))?
+        } else {
+            let old_for_db = old.clone();
+            let rename_for_db = rename.clone();
+            self.db
+                .with_postgres(move |client| {
+                    update_repo_postgres(client, &old_for_db, rename_for_db.as_deref())
+                })
+                .map_err(RepoUpdateError::Database)?
+        };
+        match outcome {
+            UpdateOutcome::Updated => Ok(()),
+            UpdateOutcome::NotFound => Err(RepoUpdateError::NotFound),
+            UpdateOutcome::Conflict => Err(RepoUpdateError::Conflict),
+        }
+    }
+
+    pub fn delete_repo(&self, repo: &str) -> Result<bool, String> {
+        let name = normalize_repo_name(repo)?;
+        if let Some(mut guard) = self.db.sqlite() {
+            let tx = guard
+                .transaction()
+                .map_err(|e| sqlite_error("开启事务失败", e))?;
+            tx.execute("DELETE FROM refs WHERE repo = ?1", params![name])
+                .map_err(|e| sqlite_error("删除仓库引用失败", e))?;
+            tx.execute("DELETE FROM objects WHERE repo = ?1", params![name])
+                .map_err(|e| sqlite_error("删除仓库对象失败", e))?;
+            let changed = tx
+                .execute("DELETE FROM repos WHERE name = ?1", params![name])
+                .map_err(|e| sqlite_error("删除仓库失败", e))?;
+            tx.commit().map_err(|e| sqlite_error("提交事务失败", e))?;
+            return Ok(changed == 1);
+        }
+        let changed = self.db.with_postgres(move |client| {
+            let mut tx = client.transaction()?;
+            tx.execute("DELETE FROM refs WHERE repo = $1", &[&name])?;
+            tx.execute("DELETE FROM objects WHERE repo = $1", &[&name])?;
+            let changed = tx.execute("DELETE FROM repos WHERE name = $1", &[&name])?;
+            tx.commit()?;
+            Ok(changed)
+        })?;
+        Ok(changed == 1)
     }
 
     pub fn put_object(
@@ -385,6 +532,89 @@ pub fn validate_ref_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn normalize_repo_name(repo: &str) -> Result<String, String> {
+    validate_repo_name(repo)?;
+    Ok(repo.strip_suffix(".git").unwrap_or(repo).to_string())
+}
+
+fn update_repo_sqlite(
+    connection: &mut rusqlite::Connection,
+    old: &str,
+    rename: Option<&str>,
+) -> rusqlite::Result<UpdateOutcome> {
+    let tx = connection.transaction()?;
+    let exists: Option<i64> = tx
+        .query_row("SELECT 1 FROM repos WHERE name = ?1", [old], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    if exists.is_none() {
+        return Ok(UpdateOutcome::NotFound);
+    }
+    let Some(new_name) = rename else {
+        return Ok(UpdateOutcome::Updated);
+    };
+    let conflict: Option<i64> = tx
+        .query_row("SELECT 1 FROM repos WHERE name = ?1", [new_name], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    if conflict.is_some() {
+        return Ok(UpdateOutcome::Conflict);
+    }
+    tx.execute(
+        "UPDATE refs SET repo = ?1 WHERE repo = ?2",
+        params![new_name, old],
+    )?;
+    tx.execute(
+        "UPDATE objects SET repo = ?1 WHERE repo = ?2",
+        params![new_name, old],
+    )?;
+    tx.execute(
+        "UPDATE repos SET name = ?1 WHERE name = ?2",
+        params![new_name, old],
+    )?;
+    tx.commit()?;
+    Ok(UpdateOutcome::Updated)
+}
+
+fn update_repo_postgres(
+    client: &mut postgres::Client,
+    old: &str,
+    rename: Option<&str>,
+) -> Result<UpdateOutcome, postgres::Error> {
+    let mut tx = client.transaction()?;
+    if tx
+        .query_opt("SELECT 1 FROM repos WHERE name = $1", &[&old])?
+        .is_none()
+    {
+        return Ok(UpdateOutcome::NotFound);
+    }
+    let Some(new_name) = rename else {
+        return Ok(UpdateOutcome::Updated);
+    };
+    if tx
+        .query_opt("SELECT 1 FROM repos WHERE name = $1", &[&new_name])?
+        .is_some()
+    {
+        return Ok(UpdateOutcome::Conflict);
+    }
+    tx.execute(
+        "UPDATE refs SET repo = $1 WHERE repo = $2",
+        &[&new_name, &old],
+    )?;
+    tx.execute(
+        "UPDATE objects SET repo = $1 WHERE repo = $2",
+        &[&new_name, &old],
+    )?;
+    tx.execute(
+        "UPDATE repos SET name = $1 WHERE name = $2",
+        &[&new_name, &old],
+    )?;
+    tx.commit()?;
+    Ok(UpdateOutcome::Updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,6 +788,57 @@ mod tests {
         );
     }
 
+    #[test]
+    fn repo_lifecycle_crud_cascades_and_validates() {
+        let (store, _dir) = sqlite_store();
+        assert!(store.create_repo("demo").unwrap());
+        assert!(
+            !store.create_repo("demo.git").unwrap(),
+            "重复创建应返回 false"
+        );
+        assert_eq!(store.list_repos().unwrap().len(), 1);
+        let info = store.get_repo("demo.git").unwrap().unwrap();
+        assert_eq!(info.name, "demo");
+        assert!(!info.created_at.is_empty());
+
+        store
+            .update_ref("demo", "refs/heads/main", None, Some("aaaa"))
+            .unwrap();
+        store
+            .put_object("demo", "aaaa", GitKind::Blob, b"x")
+            .unwrap();
+        store.update_repo("demo", Some("renamed")).unwrap();
+        assert!(store.get_repo("demo").unwrap().is_none());
+        assert_eq!(
+            store
+                .get_ref("renamed", "refs/heads/main")
+                .unwrap()
+                .as_deref(),
+            Some("aaaa")
+        );
+        assert!(store.has_object("renamed", "aaaa").unwrap());
+
+        store.create_repo("other").unwrap();
+        assert_eq!(
+            store.update_repo("renamed", Some("other")),
+            Err(RepoUpdateError::Conflict)
+        );
+
+        assert!(store.delete_repo("renamed").unwrap());
+        assert!(!store.delete_repo("renamed").unwrap());
+        assert!(store.list_refs("renamed").unwrap().is_empty());
+        assert!(!store.has_object("renamed", "aaaa").unwrap());
+    }
+
+    #[test]
+    fn repo_crud_normalizes_dot_git_suffix() {
+        let (store, _dir) = sqlite_store();
+        assert!(store.create_repo("demo.git").unwrap());
+        assert!(store.get_repo("demo.git").unwrap().is_some());
+        assert!(store.delete_repo("demo.git").unwrap());
+        assert!(store.get_repo("demo").unwrap().is_none());
+    }
+
     fn postgres_store() -> Option<Store> {
         let url = std::env::var("TEST_PG_URL").ok()?;
         let store = Store::open(&url).unwrap();
@@ -605,5 +886,23 @@ mod tests {
             store.get_setting("k").unwrap().as_deref(),
             Some(b"v".as_slice())
         );
+
+        assert!(store.create_repo("other").unwrap());
+        assert_eq!(
+            store.update_repo("demo", Some("other")),
+            Err(RepoUpdateError::Conflict)
+        );
+        store.update_repo("demo", Some("renamed")).unwrap();
+        assert_eq!(
+            store
+                .get_ref("renamed", "refs/heads/main")
+                .unwrap()
+                .as_deref(),
+            Some("aaaa")
+        );
+        assert!(store.get_repo("demo").unwrap().is_none());
+        assert!(store.delete_repo("renamed").unwrap());
+        assert!(store.get_repo("renamed").unwrap().is_none());
+        assert!(store.list_refs("renamed").unwrap().is_empty());
     }
 }

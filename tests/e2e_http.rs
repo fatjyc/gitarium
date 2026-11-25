@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 common 测试装置与真实 git 客户端
- * [OUTPUT]: 验证 HTTP 认证、首次推送建仓与并发创建冲突
+ * [OUTPUT]: 验证 HTTP 认证、首次推送建仓、克隆、标签、二进制、过期推送拒绝、空仓库与不存在仓库的行为
  * [POS]: HTTP 传输的端到端验收；不模拟协议字节，全部经由真实 git 命令
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -23,6 +23,7 @@ fn clone(dir: &std::path::Path, url: &str, into: &str) -> std::path::PathBuf {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn wrong_or_missing_password_gets_401() {
     let server = start_server().await;
+    server.store.ensure_repo("demo").unwrap();
     let path = "/demo.git/info/refs?service=git-upload-pack";
     assert_eq!(raw_status(server.addr, path, None), 401);
     let wrong = base64::engine::general_purpose::STANDARD.encode("git:wrong");
@@ -192,4 +193,15 @@ async fn cloning_an_empty_repository_succeeds() {
         "空仓库克隆失败: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cloning_a_missing_repository_fails() {
+    let server = start_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    let url = http_url(&server, "missing");
+    let target = dir.path().join("missing-clone");
+    let output = git(dir.path(), &["clone", "-q", &url, target.to_str().unwrap()]);
+    assert!(!output.status.success(), "克隆不存在的仓库应失败");
+    assert!(!target.exists(), "失败的克隆不应留下目录");
 }

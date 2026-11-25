@@ -15,6 +15,7 @@
 - HTTPS（Smart HTTP）与 SSH 两个入口，传输同一种仓库数据。
 - 支持 `clone`、`fetch`、`pull`、`push`、分支与标签、删除远端分支。
 - 首次推送自动创建仓库。
+- JSON 管理 API：列出、创建、查看、改名、删除仓库。删除必须显式确认。
 - SQLite 用于本机测试；PostgreSQL 用 Docker 启动，用于发布。两种后端行为一致。
 - 单个固定账号密码，HTTPS 与 SSH 共用同一组凭据。
 - 仓库数据只存在数据库中。进程只使用内存中的请求与响应。
@@ -48,7 +49,7 @@
 - 引用单独存放：`(repo, ref_name, oid)`。
 - 推送：解码 pack 包，解析差量得到完整对象，按 oid 幂等写入，再用比较并交换更新引用。
 - 拉取：从客户端请求的引用出发遍历对象图，编码为不含差量的 pack 包返回。
-- HEAD 是符号引用，指向仓库的默认分支（`main`）。
+- HEAD 是符号引用，固定指向 `refs/heads/main`。
 - SSH 主机密钥也存入数据库，迁移后客户端不会看到主机密钥变化。
 
 ### 技术栈
@@ -60,7 +61,7 @@ base64（Basic 认证解析）；OpenSSH askpass（测试中给 SSH 客户端作
 ### 数据库模式
 
 ```sql
-repos(name TEXT PRIMARY KEY, default_branch TEXT NOT NULL DEFAULT 'main', created_at TEXT NOT NULL)
+repos(name TEXT PRIMARY KEY, created_at TEXT NOT NULL)
 objects(repo TEXT NOT NULL, oid TEXT NOT NULL, kind INTEGER NOT NULL, data BLOB, PRIMARY KEY(repo, oid))
 refs(repo TEXT NOT NULL, name TEXT NOT NULL, oid TEXT NOT NULL, PRIMARY KEY(repo, name))
 settings(key TEXT PRIMARY KEY, value BLOB)
@@ -74,6 +75,10 @@ PostgreSQL 建表时 `BLOB` 写作 `BYTEA`。对象 `kind`：1 commit、2 tree�
 - HTTP：`GET /{name}.git/info/refs?service=git-upload-pack|git-receive-pack`；
   `POST /{name}.git/git-upload-pack`；`POST /{name}.git/git-receive-pack`。
   Basic 认证，失败返回 401 与 `WWW-Authenticate: Basic realm="git"`。
+- 管理 API：`GET|POST /api/repos`；`GET|PATCH|DELETE /api/repos/{repo}`。
+  与 Git 数据面共用监听和固定账号。PATCH 接受 `new_name`；
+  DELETE 请求体必须带 `{"confirm":"<仓库名>"}`。
+- 仓库生命周期：推送自动建仓；拉取与克隆不存在的仓库直接失败；删除同时清除该仓库的引用与对象。
 - SSH：用户 `git`（可配置），密码固定。接受且仅接受
   `git-upload-pack '<path>'` 与 `git-receive-pack '<path>'` 两种命令。
 - 仓库名：单段名称，可带或不带 `.git` 后缀；只允许字母、数字、`.`、`_`、`-`。
@@ -101,7 +106,8 @@ PostgreSQL 用单工作线程串行执行 SQL 与条件更新语句。`postgres`
 ### 认证边界
 
 单一固定账号密码，来自环境变量 `GIT_USER`（默认 `git`）与 `GIT_PASSWORD`
-（默认 `git123`）。没有账号管理界面。两个协议都校验同一组值。
+（默认 `git123`）。没有账号管理界面。两个协议与管理 API 都校验同一组值。
+管理 API 的能力等同于仓库管理员：任何持有该账号的人都可以创建、改名和删除仓库。
 
 ## 交给实现者的决定
 

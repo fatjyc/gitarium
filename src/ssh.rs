@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 russh 提供 SSH 传输；依赖 advertise、fetch、push 协议核心；依赖 Store 持久化主机密钥
- * [OUTPUT]: 导出 serve，启动密码认证的 SSH Git 服务，只接受 git-upload-pack 与 git-receive-pack
+ * [OUTPUT]: 导出 serve，启动密码认证的 SSH Git 服务，只接受 git-upload-pack 与 git-receive-pack；拉取不存在的仓库直接失败
  * [POS]: SSH 传输层；把 SSH 通道字节桥接给同步协议核心，自身不承载 Git 语义
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -233,6 +233,13 @@ fn run_protocol(
     out: &mut dyn Write,
     max: usize,
 ) -> Result<(), String> {
+    if service == Service::UploadPack && !store.repo_exists(repo)? {
+        out.write_all(format!("fatal: 仓库 {repo} 不存在\n").as_bytes())
+            .map_err(|error| format!("写错误消息失败: {error}"))?;
+        out.flush()
+            .map_err(|error| format!("发送错误消息失败: {error}"))?;
+        return Err(format!("拉取不存在的仓库 {repo}"));
+    }
     let advertisement = advertise::refs(store, repo, service)?;
     out.write_all(&advertisement)
         .map_err(|error| format!("写引用通告失败: {error}"))?;

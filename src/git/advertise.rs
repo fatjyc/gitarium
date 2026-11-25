@@ -10,6 +10,7 @@ use crate::store::{GitKind, Store};
 
 const AGENT: &str = "agent=gitdb/0.1";
 const ZERO_OID: &str = "0000000000000000000000000000000000000000";
+const HEAD_REF: &str = "refs/heads/main";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Service {
@@ -52,21 +53,17 @@ fn peel(store: &Store, repo: &str, oid: &str) -> Result<String, String> {
 
 pub fn refs(store: &Store, repo: &str, service: Service) -> Result<Vec<u8>, String> {
     let caps = capabilities(service);
-    let default_branch = store
-        .default_branch(repo)?
-        .unwrap_or_else(|| "main".to_string());
-    let head_name = format!("refs/heads/{default_branch}");
     let references = store.list_refs(repo)?;
     let head_oid = references
         .iter()
-        .find(|(name, _)| name == &head_name)
+        .find(|(name, _)| name == HEAD_REF)
         .map(|(_, oid)| oid.clone());
 
     let mut out = Vec::new();
     let mut first = true;
     if let Some(oid) = head_oid {
         let line = if service == Service::UploadPack {
-            format!("{oid} HEAD\0symref=HEAD:{head_name} {caps}\n")
+            format!("{oid} HEAD\0symref=HEAD:{HEAD_REF} {caps}\n")
         } else {
             format!("{oid} HEAD\0{caps}\n")
         };
