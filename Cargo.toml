@@ -1,0 +1,20 @@
+[package]
+name = "gitdb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+russh = "0.65"
+rand = "0.10"
+gix-pack = { version = "=0.77.0", default-features = false, features = ["streaming-input", "sha1"] }
+gix-hash = "0.28"
+rusqlite = { version = "0.43", features = ["bundled"] }
+postgres = "0.19"
+flate2 = "1"
+sha1 = "0.10"
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"
