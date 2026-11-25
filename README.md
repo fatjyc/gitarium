@@ -141,3 +141,7 @@ cargo test
 
 - 设计：`docs/superpowers/specs/2026-11-25-git-db-server-design.md`
 - 实施计划：`docs/superpowers/plans/2026-11-25-git-db-server.md`
+
+## 许可证
+
+[MIT](LICENSE)

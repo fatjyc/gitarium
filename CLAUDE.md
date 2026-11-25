@@ -12,6 +12,7 @@ docs/superpowers/ - 设计文档与实施计划
 <config>
 Cargo.toml - 依赖与版本；gix-pack 固定 0.77.0 以匹配 Rust 1.94
 README.md - 启动、推拉、仓库管理、认证与迁移说明
+LICENSE - MIT 许可证
 </config>
 
 Laws: 仓库数据只在数据库 · 只用真实 git 验收 · 固定账号 · 管理 API 同账号 · 协议 v0 · SQLite 与 PostgreSQL 行为一致
